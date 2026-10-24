@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+package-lock.json.bak
+
+# Build and Compilation Output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test Coverage and Temporary Test Artifacts
+coverage/
+.vitest/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Documentation and API Collections
+docs/
+postman/
+
+
+src/tests/
+*.test.ts
+*.spec.ts

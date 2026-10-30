@@ -103,7 +103,7 @@ backend/
 
 ```bash
 git clone <repository_url>
-cd StreetMind/backend
+cd StreetMend-BackEnd
 ```
 
 ### 2. Install Dependencies
@@ -164,22 +164,6 @@ npm run test
 | **Pending Staff Applicant**      | `applicant.roads@streetmend.gov`   | `Staff@123456`   | Roads (Pending Approval) |
 | **Citizen (John Doe)**           | `john.doe@citizen.org`             | `Citizen@123456` | Citizen                  |
 | **Citizen (Jane Smith)**         | `jane.smith@citizen.org`           | `Citizen@123456` | Citizen                  |
-
----
-
-## 📮 Postman Collection
-
-Import the pre-configured Postman resources located in `postman/`:
-
-- **Collection**: `postman/StreetMend.postman_collection.json`
-- **Environment**: `postman/StreetMend.postman_environment.json`
-
-**Features Included**:
-
-- **Full API Coverage (57 Requests across 6 Folders)**: Complete coverage for System Health, Authentication & Account, Department Owner Operations, Citizen & Public Issues, Staff & Department Operations, and Platform Administration & Analytics.
-- **Complete Auth Lifecycle**: Citizen registration, Staff registration, Email verification, Resend verification, Login (Admin/Citizen/Owner/Staff), Refresh Token rotation, Forgot Password, Verify Password Reset Token, Reset Password, Get Current Profile (`/me`), and Logout.
-- **Automatic Token & ID Chaining**: Authenticating automatically captures both `accessToken` and `refreshToken` into environment variables. Browsing departments, categories, issues, users, and staff requests dynamically captures `sampleDepartmentId`, `sampleCategoryId`, `sampleIssueId`, `sampleStaffId`, `sampleRequestId`, and `sampleUserId` so subsequent requests execute seamlessly without manual copy-pasting.
-- **Preconfigured Variables**: Includes `baseUrl`, `baseUrlRoot`, `accessToken`, `refreshToken`, `verificationToken`, `resetToken`, `sampleDepartmentId`, `sampleCategoryId`, `sampleIssueId`, `sampleStaffId`, `sampleRequestId`, and `sampleUserId`.
 
 ---
 

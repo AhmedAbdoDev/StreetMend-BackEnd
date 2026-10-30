@@ -35,7 +35,7 @@ departmentRouter.get(
 departmentRouter.get(
   "/me/staff-requests",
   authenticate,
-  authorize("STAFF", "ADMIN"),
+  authorize("STAFF"),
   requireDepartmentOwner,
   validate(listStaffRequestsSchema),
   departmentController.handleGetMyStaffRequests,
@@ -62,7 +62,7 @@ departmentRouter.patch(
 departmentRouter.get(
   "/me/members",
   authenticate,
-  authorize("STAFF", "ADMIN"),
+  authorize("STAFF"),
   requireDepartmentOwner,
   validate(listMembersSchema),
   departmentController.handleGetMyMembers,

@@ -13,6 +13,7 @@ import categoriesRouter from "./modules/issues/categories.route.js";
 import departmentRouter from "./modules/department/department.route.js";
 import analyticsRouter from "./modules/analytics/analytics.route.js";
 import notificationsRouter from "./modules/notifications/notifications.route.js";
+import healthRouter from "./modules/health/health.route.js";
 import AppError from "./error/AppError.js";
 
 export function createApp(): Express {
@@ -29,7 +30,6 @@ export function createApp(): Express {
 
   const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
-      // Allow non-browser requests (e.g. mobile apps, postman, curl) or matching origins
       if (
         !origin ||
         allowedOrigins.includes(origin) ||
@@ -87,13 +87,8 @@ export function createApp(): Express {
     app.use("/api/", globalLimiter);
   }
 
-  app.get("/health", (_req: Request, res: Response) => {
-    res.status(200).json({
-      status: "UP",
-      timestamp: new Date().toISOString(),
-      service: "StreetMend API",
-    });
-  });
+  app.use("/health", healthRouter);
+  app.use("/api/v1/health", healthRouter);
 
   app.use("/api/v1/auth", authRouter);
   app.use("/api/v1/users", usersRouter);

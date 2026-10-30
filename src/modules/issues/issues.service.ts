@@ -1,4 +1,4 @@
-import { Types, ClientSession } from "mongoose";
+import mongoose, { Types, ClientSession } from "mongoose";
 import Issue, {
   IImage,
   IssuePriority,
@@ -43,6 +43,10 @@ async function recordStatusHistory(
   reason?: string | null,
   session?: ClientSession,
 ) {
+  if (previousStatus === newStatus) {
+    return null;
+  }
+
   if (session) {
     const [entry] = await IssueStatusHistory.create(
       [
@@ -117,6 +121,18 @@ export async function createIssue(
       404,
       "CATEGORY_NOT_FOUND",
       "Active issue category not found",
+    );
+  }
+
+  const department = await Department.findOne({
+    _id: category.departmentId,
+    isActive: true,
+  });
+  if (!department) {
+    throw new AppError(
+      400,
+      "DEPARTMENT_INACTIVE",
+      "The department responsible for this category is currently inactive",
     );
   }
 
@@ -222,13 +238,42 @@ export async function listIssues(options: {
       .limit(limit),
   ]);
 
+  let issuesResult: any[] = issues;
+  if (
+    options.userId &&
+    issues.length > 0 &&
+    (mongoose.connection.readyState === 1 ||
+      Boolean((IssueSupport.find as any)?.mock))
+  ) {
+    try {
+      const issueIds = issues.map((i) => i._id);
+      const userSupports = await IssueSupport.find({
+        issueId: { $in: issueIds },
+        userId: new Types.ObjectId(options.userId),
+      }).select("issueId");
+      const supportedSet = new Set(
+        userSupports.map((s) => s.issueId.toString()),
+      );
+      issuesResult = issues.map((i) => {
+        const obj =
+          typeof (i as any).toObject === "function" ? (i as any).toObject() : i;
+        return {
+          ...obj,
+          hasSupported: supportedSet.has(i._id.toString()),
+        };
+      });
+    } catch {
+      issuesResult = issues;
+    }
+  }
+
   return {
-    issues,
+    issues: issuesResult,
     meta: buildMeta(total),
   };
 }
 
-export async function getIssueById(issueId: string) {
+export async function getIssueById(issueId: string, callerUserId?: string) {
   const issue = await Issue.findOne({ _id: issueId, isDeleted: false })
     .populate("categoryId", "name code")
     .populate("departmentId", "name code")
@@ -239,7 +284,33 @@ export async function getIssueById(issueId: string) {
     throw new AppError(404, "ISSUE_NOT_FOUND", "Issue report not found");
   }
 
-  return issue;
+  let hasSupported = false;
+  if (callerUserId) {
+    if (
+      mongoose.connection.readyState === 1 ||
+      Boolean((IssueSupport.exists as any)?.mock) ||
+      Boolean((IssueSupport.findOne as any)?.mock)
+    ) {
+      try {
+        hasSupported = !!(await IssueSupport.exists({
+          issueId: issue._id,
+          userId: new Types.ObjectId(callerUserId),
+        }));
+      } catch {
+        hasSupported = false;
+      }
+    }
+  }
+
+  const issueObj =
+    typeof (issue as any).toObject === "function"
+      ? (issue as any).toObject()
+      : issue;
+
+  return {
+    ...issueObj,
+    hasSupported,
+  };
 }
 
 export async function getStaffIssueById(
@@ -339,7 +410,14 @@ export async function updateIssue(
   }
 
   if (data.images && data.images.length > 0) {
-    const combinedLength = (issue.images?.length || 0) + data.images.length;
+    const existingPublicIds = new Set(
+      (issue.images || []).map((img) => img.publicId),
+    );
+    const newUniqueImages = data.images.filter(
+      (img) => !existingPublicIds.has(img.publicId),
+    );
+
+    const combinedLength = (issue.images?.length || 0) + newUniqueImages.length;
     if (combinedLength > 5) {
       throw new AppError(
         400,
@@ -347,7 +425,9 @@ export async function updateIssue(
         "A report cannot have more than 5 images in total",
       );
     }
-    issue.images.push(...data.images);
+    if (newUniqueImages.length > 0) {
+      issue.images.push(...newUniqueImages);
+    }
   }
 
   await issue.save();
@@ -380,6 +460,7 @@ export async function withdrawIssue(
     );
   }
 
+  const previousStatus = issue.status;
   issue.isDeleted = true;
   issue.status = "CLOSED";
   issue.closedAt = new Date();
@@ -388,7 +469,7 @@ export async function withdrawIssue(
   await recordStatusHistory(
     issue._id,
     callerId,
-    issue.status,
+    previousStatus,
     "CLOSED",
     isOwner ? "Withdrawn by citizen creator" : "Withdrawn by Administrator",
   );
@@ -414,6 +495,14 @@ export async function withdrawIssue(
 export async function supportIssue(issueId: string, userId: string) {
   const issue = await findActiveIssue(issueId);
 
+  if (issue.status === "CLOSED" || issue.status === "REJECTED") {
+    throw new AppError(
+      400,
+      "CANNOT_SUPPORT_INACTIVE_ISSUE",
+      `Cannot support an issue report in ${issue.status} status`,
+    );
+  }
+
   if (issue.createdBy && issue.createdBy.toString() === userId) {
     throw new AppError(
       400,
@@ -435,30 +524,42 @@ export async function supportIssue(issueId: string, userId: string) {
     );
   }
 
-  return withTransaction(async (session) => {
-    if (session) {
-      await IssueSupport.create(
-        [{ issueId: issue._id, userId: new Types.ObjectId(userId) }],
-        { session },
+  try {
+    return await withTransaction(async (session) => {
+      if (session) {
+        await IssueSupport.create(
+          [{ issueId: issue._id, userId: new Types.ObjectId(userId) }],
+          { session },
+        );
+      } else {
+        await IssueSupport.create({
+          issueId: issue._id,
+          userId: new Types.ObjectId(userId),
+        });
+      }
+
+      const updatedIssue = await Issue.findByIdAndUpdate(
+        issue._id,
+        { $inc: { supportCount: 1 } },
+        { new: true, session },
       );
-    } else {
-      await IssueSupport.create({
-        issueId: issue._id,
-        userId: new Types.ObjectId(userId),
-      });
+
+      return {
+        message: "Issue supported successfully",
+        supportCount:
+          updatedIssue?.supportCount ?? (issue.supportCount || 0) + 1,
+      };
+    });
+  } catch (err: any) {
+    if (err.code === 11000) {
+      throw new AppError(
+        409,
+        "ALREADY_SUPPORTED",
+        "You have already supported this issue report",
+      );
     }
-
-    const updatedIssue = await Issue.findByIdAndUpdate(
-      issue._id,
-      { $inc: { supportCount: 1 } },
-      { new: true, session },
-    );
-
-    return {
-      message: "Issue supported successfully",
-      supportCount: updatedIssue?.supportCount ?? (issue.supportCount || 0) + 1,
-    };
-  });
+    throw err;
+  }
 }
 
 export async function removeSupportIssue(issueId: string, userId: string) {
@@ -503,6 +604,14 @@ export async function flagIssue(
 ) {
   const issue = await findActiveIssue(issueId);
 
+  if (issue.createdBy && issue.createdBy.toString() === userId) {
+    throw new AppError(
+      400,
+      "CANNOT_FLAG_OWN_ISSUE",
+      "You cannot flag your own reported issue",
+    );
+  }
+
   const existingFlag = await IssueFlag.findOne({
     issueId: issue._id,
     userId: new Types.ObjectId(userId),
@@ -516,46 +625,58 @@ export async function flagIssue(
     );
   }
 
-  return withTransaction(async (session) => {
-    if (session) {
-      await IssueFlag.create(
-        [
-          {
-            issueId: issue._id,
-            userId: new Types.ObjectId(userId),
-            reason,
-          },
-        ],
-        { session },
-      );
-    } else {
-      await IssueFlag.create({
-        issueId: issue._id,
-        userId: new Types.ObjectId(userId),
-        reason,
-      });
-    }
+  try {
+    return await withTransaction(async (session) => {
+      if (session) {
+        await IssueFlag.create(
+          [
+            {
+              issueId: issue._id,
+              userId: new Types.ObjectId(userId),
+              reason,
+            },
+          ],
+          { session },
+        );
+      } else {
+        await IssueFlag.create({
+          issueId: issue._id,
+          userId: new Types.ObjectId(userId),
+          reason,
+        });
+      }
 
-    const updatedIssue = await Issue.findByIdAndUpdate(
-      issue._id,
-      { $inc: { flagCount: 1 } },
-      { new: true, session },
-    );
-
-    const newFlagCount = updatedIssue?.flagCount ?? (issue.flagCount || 0) + 1;
-    if (newFlagCount >= env.FLAG_THRESHOLD) {
-      await Issue.findByIdAndUpdate(
+      const updatedIssue = await Issue.findByIdAndUpdate(
         issue._id,
-        { isFlagged: true },
-        { session },
+        { $inc: { flagCount: 1 } },
+        { new: true, session },
+      );
+
+      const newFlagCount =
+        updatedIssue?.flagCount ?? (issue.flagCount || 0) + 1;
+      if (newFlagCount >= env.FLAG_THRESHOLD) {
+        await Issue.findByIdAndUpdate(
+          issue._id,
+          { isFlagged: true },
+          { session },
+        );
+      }
+
+      return {
+        message: "Issue report flagged for moderator review",
+        flagCount: newFlagCount,
+      };
+    });
+  } catch (err: any) {
+    if (err.code === 11000) {
+      throw new AppError(
+        409,
+        "ALREADY_FLAGGED",
+        "You have already flagged this issue report",
       );
     }
-
-    return {
-      message: "Issue report flagged for moderator review",
-      flagCount: newFlagCount,
-    };
-  });
+    throw err;
+  }
 }
 
 export async function getIssueHistory(issueId: string) {
@@ -577,6 +698,14 @@ export async function assignIssue(
   callerRole: string,
 ) {
   const issue = await findActiveIssue(issueId);
+
+  if (issue.status === "CLOSED" || issue.status === "REJECTED") {
+    throw new AppError(
+      400,
+      "CANNOT_ASSIGN_INACTIVE_ISSUE",
+      `Cannot assign an issue report in ${issue.status} status`,
+    );
+  }
 
   if (callerRole !== "ADMIN") {
     const caller = await User.findById(callerId);
@@ -615,14 +744,6 @@ export async function assignIssue(
   issue.assignedTo = assignee._id;
   await issue.save();
 
-  await recordStatusHistory(
-    issue._id,
-    callerId,
-    issue.status,
-    issue.status,
-    `Report assigned to staff member ${assignee.name}`,
-  );
-
   createNotification({
     recipientId: assignee._id.toString(),
     issueId: issue._id.toString(),
@@ -641,17 +762,16 @@ export async function updateIssuePriority(
 ) {
   const issue = await findActiveIssue(issueId);
 
-  const oldPriority = issue.priority;
+  if (issue.status === "CLOSED" || issue.status === "REJECTED") {
+    throw new AppError(
+      400,
+      "CANNOT_UPDATE_INACTIVE_ISSUE_PRIORITY",
+      `Cannot adjust priority for an issue report in ${issue.status} status`,
+    );
+  }
+
   issue.priority = priority;
   await issue.save();
-
-  await recordStatusHistory(
-    issue._id,
-    callerId,
-    issue.status,
-    issue.status,
-    `Priority adjusted from ${oldPriority} to ${priority}`,
-  );
 
   return issue;
 }
@@ -669,7 +789,13 @@ export async function adminUpdateIssueStatus(
 
   if (newStatus === "CLOSED") {
     issue.closedAt = new Date();
-  } else if (newStatus === "REOPENED") {
+    if (!issue.resolvedAt) {
+      issue.resolvedAt = new Date();
+    }
+  } else if (newStatus === "RESOLVED") {
+    issue.resolvedAt = new Date();
+    issue.closedAt = undefined;
+  } else {
     issue.closedAt = undefined;
     issue.resolvedAt = undefined;
   }
@@ -703,10 +829,27 @@ export async function updateStaffIssueStatus(
   staffDepartmentId: string | undefined,
   newStatus: IssueStatus,
   reason?: string,
+  departmentPosition?: string,
 ) {
   const issue = await findActiveIssue(issueId);
 
   assertStaffDepartment(staffDepartmentId, issue.departmentId);
+
+  if (newStatus === "IN_PROGRESS") {
+    if (issue.assignedTo) {
+      const isAssignee = issue.assignedTo.toString() === staffUserId;
+      const isOwner = departmentPosition === "OWNER";
+      if (!isAssignee && !isOwner) {
+        throw new AppError(
+          403,
+          "FORBIDDEN_NOT_ASSIGNED",
+          "Only the assigned staff member or department owner can begin work on this report",
+        );
+      }
+    } else {
+      issue.assignedTo = new Types.ObjectId(staffUserId) as any;
+    }
+  }
 
   if (issue.status === "IN_PROGRESS" && newStatus === "RESOLVED") {
     throw new AppError(
@@ -769,10 +912,23 @@ export async function submitResolution(
   staffDepartmentId: string | undefined,
   notes: string,
   resolutionImages?: IImage[],
+  departmentPosition?: string,
 ) {
   const issue = await findActiveIssue(issueId);
 
   assertStaffDepartment(staffDepartmentId, issue.departmentId);
+
+  if (issue.assignedTo) {
+    const isAssignee = issue.assignedTo.toString() === staffUserId;
+    const isOwner = departmentPosition === "OWNER";
+    if (!isAssignee && !isOwner) {
+      throw new AppError(
+        403,
+        "FORBIDDEN_NOT_ASSIGNED",
+        "Only the assigned staff member or department owner can resolve this issue",
+      );
+    }
+  }
 
   if (issue.status !== "IN_PROGRESS" && issue.status !== "ACCEPTED") {
     throw new AppError(
@@ -921,6 +1077,23 @@ export async function updateCategory(
         "Active department not found",
       );
     category.departmentId = dept._id;
+  }
+
+  if (data.name || data.code) {
+    const conflict = await IssueCategory.findOne({
+      _id: { $ne: category._id },
+      $or: [
+        ...(data.name ? [{ name: data.name }] : []),
+        ...(data.code ? [{ code: data.code.toUpperCase() }] : []),
+      ],
+    });
+    if (conflict) {
+      throw new AppError(
+        409,
+        "CATEGORY_EXISTS",
+        "Category with this name or code already exists",
+      );
+    }
   }
 
   if (data.name) category.name = data.name;

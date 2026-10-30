@@ -46,6 +46,14 @@ issuesRouter.get(
   issuesController.handleListStaffIssues,
 );
 
+issuesRouter.get(
+  "/department/:issueId",
+  authenticate,
+  authorize("STAFF"),
+  validate(issueIdParamSchema),
+  issuesController.handleGetDepartmentIssueById,
+);
+
 issuesRouter.post(
   "/",
   issueCreationLimiter,

@@ -309,6 +309,23 @@ export async function updateDepartment(
     throw new AppError(404, "DEPARTMENT_NOT_FOUND", "Department not found");
   }
 
+  if (data.name || data.code) {
+    const conflict = await Department.findOne({
+      _id: { $ne: department._id },
+      $or: [
+        ...(data.name ? [{ name: data.name }] : []),
+        ...(data.code ? [{ code: data.code.toUpperCase() }] : []),
+      ],
+    });
+    if (conflict) {
+      throw new AppError(
+        409,
+        "DEPARTMENT_EXISTS",
+        "Department with this name or code already exists",
+      );
+    }
+  }
+
   if (data.name) department.name = data.name;
   if (data.code) department.code = data.code.toUpperCase();
   if (data.isActive !== undefined) department.isActive = data.isActive;

@@ -84,6 +84,16 @@ export async function updateUserRole(userId: string, newRole: UserRole) {
     await ensureNotLastActiveAdmin(user, "demote");
   }
 
+  if (newRole !== "STAFF") {
+    await Department.updateMany(
+      { ownerId: user._id },
+      { $set: { ownerId: null } },
+    );
+    user.departmentId = null;
+    user.departmentPosition = null;
+    user.staffApprovalStatus = null;
+  }
+
   user.role = newRole;
   await user.save();
 
@@ -95,6 +105,13 @@ export async function updateUserStatus(userId: string, isActive: boolean) {
 
   if (!isActive) {
     await ensureNotLastActiveAdmin(user, "deactivate");
+    if (user.departmentPosition === "OWNER") {
+      await Department.updateMany(
+        { ownerId: user._id },
+        { $set: { ownerId: null } },
+      );
+      user.departmentPosition = "MEMBER";
+    }
   }
 
   user.isActive = isActive;
@@ -109,6 +126,14 @@ export async function updateUserDepartment(
 ) {
   const user = await findUserById(userId);
 
+  if (user.role !== "STAFF") {
+    throw new AppError(
+      400,
+      "INVALID_USER_ROLE",
+      "Only staff members can be assigned to a department",
+    );
+  }
+
   const department = await Department.findOne({
     _id: departmentId,
     isActive: true,
@@ -121,7 +146,6 @@ export async function updateUserDepartment(
     );
   }
 
-  // If this user was previously appointed as owner of any department, disassociate ownership
   await Department.updateMany(
     { ownerId: user._id },
     { $set: { ownerId: null } },

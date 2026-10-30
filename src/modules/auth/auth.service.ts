@@ -94,7 +94,13 @@ export async function registerStaff(data: {
   phone?: string;
 }) {
   const existingUser = await User.findOne({ email: data.email.toLowerCase() });
-  if (existingUser) {
+  const isRejectedStaffReapplying =
+    existingUser &&
+    existingUser.role === "STAFF" &&
+    existingUser.staffApprovalStatus === "REJECTED" &&
+    !existingUser.isActive;
+
+  if (existingUser && !isRejectedStaffReapplying) {
     throw new AppError(
       409,
       "EMAIL_EXISTS",
@@ -119,18 +125,31 @@ export async function registerStaff(data: {
     env.BCRYPT_SALT_ROUNDS,
   );
 
-  const user = await User.create({
-    name: data.name,
-    email: data.email.toLowerCase(),
-    password: hashedPassword,
-    role: "STAFF",
-    departmentId: department._id,
-    departmentPosition: "MEMBER",
-    isActive: false,
-    staffApprovalStatus: "PENDING",
-    isEmailVerified: false,
-    phone: data.phone || null,
-  });
+  let user: any;
+  if (isRejectedStaffReapplying && existingUser) {
+    existingUser.name = data.name;
+    existingUser.password = hashedPassword;
+    existingUser.departmentId = department._id;
+    existingUser.departmentPosition = "MEMBER";
+    existingUser.staffApprovalStatus = "PENDING";
+    existingUser.isActive = false;
+    existingUser.phone = data.phone || null;
+    await existingUser.save();
+    user = existingUser;
+  } else {
+    user = await User.create({
+      name: data.name,
+      email: data.email.toLowerCase(),
+      password: hashedPassword,
+      role: "STAFF",
+      departmentId: department._id,
+      departmentPosition: "MEMBER",
+      isActive: false,
+      staffApprovalStatus: "PENDING",
+      isEmailVerified: false,
+      phone: data.phone || null,
+    });
+  }
 
   await StaffRequest.create({
     applicantId: user._id,

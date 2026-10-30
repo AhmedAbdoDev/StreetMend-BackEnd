@@ -39,7 +39,7 @@ export async function listUserNotifications(
     filter.isRead = options.isRead;
   }
 
-  const { skip, buildMeta } = calculatePagination(options);
+  const { skip, limit, buildMeta } = calculatePagination(options);
 
   const [total, notifications] = await Promise.all([
     Notification.countDocuments(filter),
@@ -47,7 +47,7 @@ export async function listUserNotifications(
       .populate("issueId", "reportNumber title status")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(options.limit || 20),
+      .limit(limit),
   ]);
 
   return {

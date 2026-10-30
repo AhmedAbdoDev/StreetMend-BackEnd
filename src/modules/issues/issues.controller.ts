@@ -1,6 +1,9 @@
 import { Request, Response } from "express";
 import * as issuesService from "./issues.service.js";
-import { uploadMultipleImages } from "../../services/media.service.js";
+import {
+  uploadMultipleImages,
+  cleanupUploadedImages,
+} from "../../services/media.service.js";
 import { sendSuccess } from "../../utils/response.js";
 import AppError from "../../error/AppError.js";
 
@@ -12,16 +15,22 @@ async function processUploadedImages(
   if (files && Array.isArray(files) && files.length > 0) {
     const fileBuffers = files.map((f: Express.Multer.File) => f.buffer);
     const uploaded = await uploadMultipleImages(fileBuffers, folder);
-    return [...existingImages, ...uploaded];
+    return {
+      combined: [...existingImages, ...uploaded],
+      newlyUploaded: uploaded,
+    };
   }
-  return existingImages;
+  return {
+    combined: existingImages,
+    newlyUploaded: [],
+  };
 }
 
 export async function handleCreateIssue(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const images = await processUploadedImages(
+  const { combined: images, newlyUploaded } = await processUploadedImages(
     req.files,
     "streetmend/issues",
     req.body.images || [],
@@ -32,8 +41,15 @@ export async function handleCreateIssue(
     images,
   };
 
-  const issue = await issuesService.createIssue(req.user!.id, payload);
-  sendSuccess(res, 201, "Civic issue reported successfully", issue);
+  try {
+    const issue = await issuesService.createIssue(req.user!.id, payload);
+    sendSuccess(res, 201, "Civic issue reported successfully", issue);
+  } catch (err) {
+    if (newlyUploaded.length > 0) {
+      await cleanupUploadedImages(newlyUploaded.map((img) => img.publicId));
+    }
+    throw err;
+  }
 }
 
 export async function handleListIssues(
@@ -60,16 +76,27 @@ export async function handleGetIssueById(
   req: Request,
   res: Response,
 ): Promise<void> {
-  let issue;
-  if (req.user?.role === "STAFF") {
-    issue = await issuesService.getStaffIssueById(
-      req.params.issueId as string,
-      req.user.departmentId,
-    );
-  } else {
-    issue = await issuesService.getIssueById(req.params.issueId as string);
-  }
+  const issue = await issuesService.getIssueById(
+    req.params.issueId as string,
+    req.user?.id,
+  );
   sendSuccess(res, 200, "Issue details retrieved successfully", issue);
+}
+
+export async function handleGetDepartmentIssueById(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const issue = await issuesService.getStaffIssueById(
+    req.params.issueId as string,
+    req.user?.departmentId,
+  );
+  sendSuccess(
+    res,
+    200,
+    "Department issue details retrieved successfully",
+    issue,
+  );
 }
 
 export async function handleUpdateIssue(
@@ -77,12 +104,15 @@ export async function handleUpdateIssue(
   res: Response,
 ): Promise<void> {
   let images = req.body.images;
+  let newlyUploaded: any[] = [];
   if (req.files && Array.isArray(req.files) && req.files.length > 0) {
-    images = await processUploadedImages(
+    const processed = await processUploadedImages(
       req.files,
       "streetmend/issues",
       images || [],
     );
+    images = processed.combined;
+    newlyUploaded = processed.newlyUploaded;
   }
 
   const updates = {
@@ -90,12 +120,19 @@ export async function handleUpdateIssue(
     ...(images !== undefined && { images }),
   };
 
-  const updatedIssue = await issuesService.updateIssue(
-    req.params.issueId as string,
-    req.user!.id,
-    updates,
-  );
-  sendSuccess(res, 200, "Issue updated successfully", updatedIssue);
+  try {
+    const updatedIssue = await issuesService.updateIssue(
+      req.params.issueId as string,
+      req.user!.id,
+      updates,
+    );
+    sendSuccess(res, 200, "Issue updated successfully", updatedIssue);
+  } catch (err) {
+    if (newlyUploaded.length > 0) {
+      await cleanupUploadedImages(newlyUploaded.map((img) => img.publicId));
+    }
+    throw err;
+  }
 }
 
 export async function handleWithdrawIssue(
@@ -263,6 +300,7 @@ export async function handleUpdateIssueStatus(
       req.user!.departmentId,
       status,
       reason,
+      req.user!.departmentPosition,
     );
   } else {
     throw new AppError(
@@ -343,56 +381,38 @@ export async function handleListStaffIssues(
   );
 }
 
-export async function handleGetStaffIssueById(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const issue = await issuesService.getStaffIssueById(
-    req.params.issueId as string,
-    req.user!.departmentId,
-  );
-  sendSuccess(
-    res,
-    200,
-    "Department issue details retrieved successfully",
-    issue,
-  );
-}
-
-export async function handleUpdateStaffIssueStatus(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const { status, reason } = req.body;
-  const updated = await issuesService.updateStaffIssueStatus(
-    req.params.issueId as string,
-    req.user!.id,
-    req.user!.departmentId,
-    status,
-    reason,
-  );
-  sendSuccess(res, 200, "Issue status updated successfully", updated);
-}
+// Aliases for backwards compatibility
+export const handleGetStaffIssueById = handleGetDepartmentIssueById;
+export const handleUpdateStaffIssueStatus = handleUpdateIssueStatus;
 
 export async function handleSubmitResolution(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const resolutionImages = await processUploadedImages(
-    req.files,
-    "streetmend/resolutions",
-    req.body.resolutionImages || [],
-  );
+  const { combined: resolutionImages, newlyUploaded } =
+    await processUploadedImages(
+      req.files,
+      "streetmend/resolutions",
+      req.body.resolutionImages || [],
+    );
 
-  const resolved = await issuesService.submitResolution(
-    req.params.issueId as string,
-    req.user!.id,
-    req.user!.departmentId,
-    req.body.notes,
-    resolutionImages,
-  );
+  try {
+    const resolved = await issuesService.submitResolution(
+      req.params.issueId as string,
+      req.user!.id,
+      req.user!.departmentId,
+      req.body.notes,
+      resolutionImages,
+      req.user!.departmentPosition,
+    );
 
-  sendSuccess(res, 200, "Resolution submitted successfully", resolved);
+    sendSuccess(res, 200, "Resolution submitted successfully", resolved);
+  } catch (err) {
+    if (newlyUploaded.length > 0) {
+      await cleanupUploadedImages(newlyUploaded.map((img) => img.publicId));
+    }
+    throw err;
+  }
 }
 
 export async function handleGetMyAssignments(

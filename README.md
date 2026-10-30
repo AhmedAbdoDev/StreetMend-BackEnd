@@ -1,4 +1,4 @@
-# StreetMend — Civic Issue Reporting Platform Backend
+# StreetMend: Civic Issue Reporting Platform Backend
 
 [![Node.js](https://img.shields.io/badge/Node.js-v22.17.0-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-v5.9.2-blue.svg)](https://www.typescriptlang.org/)
@@ -7,7 +7,7 @@
 [![Vitest](https://img.shields.io/badge/Tested%20with-Vitest-purple.svg)](https://vitest.dev/)
 [![License: ISC](https://img.shields.io/badge/License-ISC-yellow.svg)](https://opensource.org/licenses/ISC)
 
-StreetMend is a production-grade, backend-first Civic Issue Reporting Platform designed to bridge communication between citizens and municipal authorities. The platform enables citizens to report public-area defects—such as potholes, water main leaks, broken streetlights, sewage overflows, and illegal waste dumping—and track them through an auditable, status-driven lifecycle, while municipal department owners and field staff triage, assign, and resolve reports.
+StreetMend is a production-grade, backend-first Civic Issue Reporting Platform designed to bridge communication between citizens and municipal authorities. The platform enables citizens to report public-area defects (such as potholes, water main leaks, broken streetlights, sewage overflows, and illegal waste dumping) and track them through an auditable, status-driven lifecycle, while municipal department owners and field staff triage, assign, and resolve reports.
 
 ---
 
@@ -142,18 +142,10 @@ The server will start with hot-reloading at `http://localhost:5000/api/v1`.
 
 ## 🧪 Testing
 
-StreetMend features 58 automated unit and integration tests covering the complete authentication lifecycle, department isolation, staff approvals, and state machine transitions:
+StreetMend includes automated unit and integration tests covering the complete authentication lifecycle, department isolation, staff approvals, and state machine transitions:
 
 ```bash
 npm run test
-```
-
-### Verified Test Results:
-
-```
- Test Files  10 passed (10)
-      Tests  58 passed (58)
-   Duration  7.14s
 ```
 
 ---

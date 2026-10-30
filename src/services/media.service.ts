@@ -107,7 +107,11 @@ export async function deleteImage(publicIdOrUrl: string): Promise<void> {
 
   if (!publicId) return;
 
-  if (!env.CLOUDINARY_CLOUD_NAME || !env.CLOUDINARY_API_KEY) {
+  if (
+    !env.CLOUDINARY_CLOUD_NAME ||
+    !env.CLOUDINARY_API_KEY ||
+    !env.CLOUDINARY_API_SECRET
+  ) {
     return;
   }
 

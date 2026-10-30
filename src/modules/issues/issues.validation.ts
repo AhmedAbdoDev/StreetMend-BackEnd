@@ -66,35 +66,48 @@ export const createIssueSchema = z.object({
   }),
 });
 
-export const updateIssueSchema = z.object({
-  params: z.object({
-    issueId: z.string().regex(objectIdRegex, "Invalid issue ID format"),
-  }),
-  body: z.object({
-    title: z.string().trim().min(5).max(100).optional(),
-    description: z.string().trim().min(10).max(2000).optional(),
-    latitude: latitudeSchema.optional(),
-    longitude: longitudeSchema.optional(),
-    address: z.string().trim().optional(),
-    images: z.array(imageSchema).optional(),
-    removeImagePublicIds: z
-      .union([
-        z.array(z.string()),
-        z.string().transform((val) => {
-          try {
-            const parsed = JSON.parse(val);
-            return Array.isArray(parsed) ? parsed : [val];
-          } catch {
-            return val
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
-          }
-        }),
-      ])
-      .optional(),
-  }),
-});
+export const updateIssueSchema = z
+  .object({
+    params: z.object({
+      issueId: z.string().regex(objectIdRegex, "Invalid issue ID format"),
+    }),
+    body: z.object({
+      title: z.string().trim().min(5).max(100).optional(),
+      description: z.string().trim().min(10).max(2000).optional(),
+      latitude: latitudeSchema.optional(),
+      longitude: longitudeSchema.optional(),
+      address: z.string().trim().optional(),
+      images: z.array(imageSchema).optional(),
+      removeImagePublicIds: z
+        .union([
+          z.array(z.string()),
+          z.string().transform((val) => {
+            try {
+              const parsed = JSON.parse(val);
+              return Array.isArray(parsed) ? parsed : [val];
+            } catch {
+              return val
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+            }
+          }),
+        ])
+        .optional(),
+    }),
+  })
+  .refine(
+    (data) => {
+      const hasLat = data.body.latitude !== undefined;
+      const hasLng = data.body.longitude !== undefined;
+      return (hasLat && hasLng) || (!hasLat && !hasLng);
+    },
+    {
+      message:
+        "Both latitude and longitude must be provided together when updating coordinates",
+      path: ["body", "longitude"],
+    },
+  );
 
 export const flagIssueSchema = z.object({
   params: z.object({

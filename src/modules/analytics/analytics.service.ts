@@ -38,12 +38,17 @@ export async function getAnalyticsOverview() {
     statusCounts.IN_PROGRESS +
     statusCounts.REOPENED;
 
+  const totalCitizens = Math.max(0, totalUsers - staffCount);
+
   return {
     totalIssues,
     openIssues,
     resolvedIssues: statusCounts.RESOLVED + statusCounts.CLOSED,
     rejectedIssues: statusCounts.REJECTED,
     statusBreakdown: statusCounts,
+    totalCitizens,
+    totalStaff: staffCount,
+    totalDepartments: 0,
     totalActiveUsers: totalUsers,
     totalActiveStaff: staffCount,
     flaggedIssuesCount: flaggedCount,
@@ -51,7 +56,7 @@ export async function getAnalyticsOverview() {
 }
 
 export async function getAnalyticsCategories() {
-  const [byCategory, byDepartment] = await Promise.all([
+  const [byCategoryRaw, byDepartment] = await Promise.all([
     Issue.aggregate([
       { $match: { isDeleted: false } },
       { $group: { _id: "$categoryId", count: { $sum: 1 } } },
@@ -65,10 +70,20 @@ export async function getAnalyticsCategories() {
       },
       { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
       {
+        $lookup: {
+          from: "departments",
+          localField: "category.departmentId",
+          foreignField: "_id",
+          as: "department",
+        },
+      },
+      { $unwind: { path: "$department", preserveNullAndEmptyArrays: true } },
+      {
         $project: {
           _id: 1,
           name: { $ifNull: ["$category.name", "Uncategorized"] },
           code: { $ifNull: ["$category.code", "UNKNOWN"] },
+          departmentName: { $ifNull: ["$department.name", "General"] },
           count: 1,
         },
       },
@@ -97,6 +112,27 @@ export async function getAnalyticsCategories() {
       { $sort: { count: -1 } },
     ]),
   ]);
+
+  const totalIssues = (byCategoryRaw || []).reduce(
+    (sum: number, item: any) => sum + (item.count || 0),
+    0,
+  );
+
+  const byCategory = (byCategoryRaw || []).map((cat: any) => {
+    const count = cat.count || 0;
+    const percentage =
+      totalIssues > 0 ? Math.round((count / totalIssues) * 1000) / 10 : 0;
+    return {
+      _id: cat._id,
+      categoryId: cat._id ? cat._id.toString() : "",
+      name: cat.name,
+      categoryName: cat.name,
+      code: cat.code,
+      departmentName: cat.departmentName || "General",
+      count,
+      percentage,
+    };
+  });
 
   return {
     byCategory,
@@ -184,9 +220,20 @@ export async function getAnalyticsResolutionTime() {
       : 0;
   const totalResolved = result.length > 0 ? result[0].totalResolved : 0;
 
+  const departmentMetrics = departmentResult.map((dept: any) => ({
+    departmentId: dept._id ? dept._id.toString() : "unassigned",
+    departmentName: dept.departmentName,
+    departmentCode: dept.departmentCode,
+    avgResolutionHours: dept.averageResolutionHours ?? 0,
+    resolvedCount: dept.resolvedCount ?? 0,
+  }));
+
   return {
     overallAverageResolutionHours: overallAvg,
     totalResolvedReportsCount: totalResolved,
     byDepartment: departmentResult,
+    overallAvgHours: overallAvg,
+    totalResolvedCount: totalResolved,
+    departmentMetrics,
   };
 }
